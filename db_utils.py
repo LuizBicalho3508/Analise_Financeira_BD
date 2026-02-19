@@ -37,7 +37,7 @@ def criar_usuario(nome, email, senha, cargo='usuario', ativo=True):
             upsert=True
         )
         return True
-    exceptException as e:
+    except Exception as e: # <--- CORREÇÃO AQUI (Espaço adicionado)
         return False
 
 def verificar_login(email, senha):
@@ -86,12 +86,12 @@ def atualizar_dados_usuario(email_antigo, novo_nome, novo_email, novo_cargo, nov
         hashed = bcrypt.hashpw(nova_senha.encode('utf-8'), bcrypt.gensalt())
         dados_atualizar["password"] = hashed
     
-    # Se mudou o email, precisamos garantir que não duplique, então fazemos um update no ID ou find pelo email antigo
-    # Para simplificar aqui, vamos assumir update pelo email original
+    # Atualiza baseado no email antigo
     db.users.update_one({"email": email_antigo}, {"$set": dados_atualizar})
     return True
 
-# --- FUNÇÕES FINANCEIRAS (MANTIDAS IGUAIS) ---
+# --- FUNÇÕES FINANCEIRAS ---
+
 def salvar_dados_mongo(df):
     db = get_db()
     if db is None: return 0
@@ -113,9 +113,12 @@ def salvar_dados_mongo(df):
 def carregar_filtros_mongo():
     db = get_db()
     if db is None: return [], []
-    empresas = db.folha_eventos.distinct("Empresa")
-    competencias = db.folha_eventos.distinct("Competência")
-    return sorted(empresas), sorted(competencias)
+    try:
+        empresas = db.folha_eventos.distinct("Empresa")
+        competencias = db.folha_eventos.distinct("Competência")
+        return sorted(empresas), sorted(competencias)
+    except:
+        return [], []
 
 @st.cache_data(ttl=600)
 def carregar_dados_mongo(empresas_sel, competencias_sel):
@@ -129,6 +132,7 @@ def carregar_dados_mongo(empresas_sel, competencias_sel):
     return df
 
 # --- CONFIGURAÇÕES (CARGOS E EXCEÇÕES) ---
+
 def carregar_mapa_cargos_mongo():
     db = get_db()
     if db is None: return {}
