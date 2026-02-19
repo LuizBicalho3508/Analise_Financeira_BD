@@ -114,7 +114,6 @@ if not st.session_state['auth_status']:
         with st.form("login_form"):
             email = st.text_input("E-mail")
             senha = st.text_input("Senha", type="password")
-            # Botão Azul (Primary)
             submit = st.form_submit_button("Entrar", type="primary")
             
             if submit:
@@ -238,7 +237,6 @@ with st.sidebar:
     except: st.header("Brasil Digital")
     st.write(f"👤 **{user['name']}**")
     st.caption(f"Cargo: {user['role'].upper()}")
-    # Botão de Sair (Verde - Padrão do CSS)
     if st.button("Sair"):
         st.session_state['auth_status'] = False
         st.session_state['user_info'] = {}
@@ -261,7 +259,7 @@ with abas[0]:
         c1, c2 = st.columns(2)
         filtro_empresa_db = c1.multiselect("Empresas", opcoes_empresas, default=opcoes_empresas)
         filtro_competencia_db = c2.multiselect("Competências", opcoes_competencias, default=[opcoes_competencias[-1]] if opcoes_competencias else [])
-        if st.button("🔍 Buscar Dados", type="primary"): # Botão Azul
+        if st.button("🔍 Buscar Dados", type="primary"): 
             if not filtro_empresa_db or not filtro_competencia_db:
                 st.warning("Selecione Empresa e Competência.")
             else:
@@ -281,7 +279,7 @@ with abas[0]:
                 if not df_temp.empty:
                     st.session_state['df_financeiro'] = df_temp
                     st.success(f"{len(df_temp)} processados.")
-                    if st.button("💾 SALVAR NO BANCO", type="primary"): # Botão Azul
+                    if st.button("💾 SALVAR NO BANCO", type="primary"): 
                         with st.spinner("Salvando..."):
                             total = salvar_dados_mongo(df_temp)
                         st.success(f"{total} salvos!")
@@ -324,35 +322,31 @@ with abas[0]:
             k3.metric("👥 Colaboradores", qtd_colab)
             k4.metric("📊 Ticket Médio", f"R$ {media:,.2f}")
 
-            # --- PREPARAÇÃO DOS GRÁFICOS PARA TELA E PDF ---
-            # 1. Por Área (Barra)
+            # --- PREPARAÇÃO DOS GRÁFICOS ---
             fig_area = px.bar(
                 df.groupby('Area')['Valor (R$)'].sum().reset_index().sort_values('Valor (R$)'), 
                 x='Valor (R$)', y='Area', orientation='h', title="Custo por Área",
-                color_discrete_sequence=['#002776'] # Azul
+                color_discrete_sequence=['#002776']
             )
             
-            # 2. Por Empresa (Pizza)
             fig_emp = px.pie(
                 df.groupby('Empresa')['Valor (R$)'].sum().reset_index(), 
                 values='Valor (R$)', names='Empresa', title="Custo por Empresa",
                 color_discrete_sequence=px.colors.sequential.Blues_r
             )
 
-            # 3. Evolução Temporal (Linha) - NOVO GRÁFICO
             df_line = df.groupby('Competência')['Valor (R$)'].sum().reset_index()
-            # Ordenação correta de datas (MM/AAAA)
             try:
                 df_line['Data_Ord'] = pd.to_datetime(df_line['Competência'], format='%m/%Y', errors='coerce')
                 df_line = df_line.sort_values('Data_Ord')
-            except: pass # Se der erro, mantem ordenação padrão
+            except: pass 
             
             fig_line = px.line(
                 df_line, x='Competência', y='Valor (R$)', markers=True, 
                 title="Evolução Mensal (Custo Total)",
-                color_discrete_sequence=['#009639'] # Verde
+                color_discrete_sequence=['#009639']
             )
-            fig_line.update_layout(xaxis=dict(type='category')) # Garante ordem correta no eixo X
+            fig_line.update_layout(xaxis=dict(type='category'))
 
             # --- ÁREA DE EXPORTAÇÃO ---
             with st.container():
@@ -368,15 +362,12 @@ with abas[0]:
                 }
                 
                 with col_exp1:
-                    # Botão Azul (Primary)
                     if st.button("📄 Baixar Relatório PDF (Analítico)", type="primary", use_container_width=True):
-                        with st.spinner("Renderizando gráficos para PDF (isso pode levar alguns segundos)..."):
-                            # Passa a lista COM O NOVO GRÁFICO DE LINHA
+                        with st.spinner("Renderizando gráficos para PDF..."):
                             pdf_bytes = gerar_pdf_analitico(df, metrics_export, [fig_area, fig_emp, fig_line], user['name'])
                             st.download_button("⬇️ Clique para Download PDF", data=pdf_bytes, file_name="relatorio_financeiro.pdf", mime="application/pdf", key="pdf_down")
                 
                 with col_exp2:
-                    # Botão Azul (Primary)
                     if st.button("📊 Baixar Excel Completo (XLSX)", type="primary", use_container_width=True):
                         with st.spinner("Gerando Excel..."):
                             xls_bytes = gerar_excel_personalizado(df)
@@ -387,12 +378,9 @@ with abas[0]:
             subtab1, subtab2, subtab3 = st.tabs(["Visão Geral", "Inteligência", "Detalhado"])
             
             with subtab1:
-                # Linha Superior: Barras e Pizza
                 c_viz1, c_viz2 = st.columns(2)
                 c_viz1.plotly_chart(fig_area, use_container_width=True)
                 c_viz2.plotly_chart(fig_emp, use_container_width=True)
-                
-                # Linha Inferior: Novo Gráfico de Linha
                 st.plotly_chart(fig_line, use_container_width=True)
 
             with subtab2:
@@ -471,36 +459,94 @@ with abas[1]:
             k3.metric("Dias Off", f"{final['Dias'].sum():,.1f}")
             
             st.dataframe(final.style.format({'Pagar': 'R$ {:,.2f}', 'Mensal': 'R$ {:,.2f}', 'Dias': '{:.1f}'}), use_container_width=True)
-    else: st.info("Carregue dados.")
+    else: st.info("Carregue dados no Dashboard primeiro.")
 
 # ==============================================================================
-# ABA 3: CONFIGURAÇÃO
+# ABA 3: CONFIGURAÇÃO DE ÁREAS (Com filtro restaurado)
 # ==============================================================================
 with abas[2]:
     c1, c2 = st.columns(2)
     df_cur = st.session_state.get('df_financeiro', pd.DataFrame())
     
+    # --- 1. CONFIGURAÇÃO POR CARGO ---
     with c1:
-        st.subheader("Cargos")
+        st.subheader("1. Configuração por Cargos")
         mcargos = carregar_mapa_cargos_mongo()
         cexist = list(df_cur['Cargo'].unique()) if not df_cur.empty and 'Cargo' in df_cur.columns else []
         all_c = sorted(list(set(cexist) | set(mcargos.keys())))
+        
         if all_c:
-            edit = st.data_editor(pd.DataFrame([{"Cargo": c, "Area": mcargos.get(c, "")} for c in all_c]), use_container_width=True, hide_index=True)
-            if st.button("Salvar Cargos", type="primary"):
+            edit = st.data_editor(
+                pd.DataFrame([{"Cargo": c, "Area": mcargos.get(c, "")} for c in all_c]), 
+                use_container_width=True, 
+                hide_index=True
+            )
+            if st.button("💾 Salvar Regras de Cargos", type="primary"):
                 salvar_mapa_cargos_mongo({r['Cargo']: r['Area'] for _, r in edit.iterrows() if r['Area']})
-                st.success("Salvo!")
+                st.success("Regras de Cargos atualizadas!")
+                time.sleep(1)
+                st.rerun()
+        else:
+            st.info("Nenhum cargo encontrado (carregue dados primeiro).")
     
+    # --- 2. CONFIGURAÇÃO POR EXCEÇÃO (PESSOAS) COM FILTRO ---
     with c2:
-        st.subheader("Exceções")
+        st.subheader("2. Exceções (Por Pessoa)")
         mexc = carregar_mapa_excecoes_mongo()
-        if not df_cur.empty and 'Nome' in df_cur.columns:
-            nomes = sorted(df_cur['Nome'].unique())
-            edit_exc = st.data_editor(pd.DataFrame([{"Nome": n, "Area Excecao": mexc.get(n, "")} for n in nomes]), use_container_width=True, hide_index=True)
-            if st.button("Salvar Exceções", type="primary"):
-                salvar_mapa_excecoes_mongo({r['Nome']: r['Area Excecao'] for _, r in edit_exc.iterrows() if r['Area Excecao']})
-                st.success("Salvo!")
-        else: st.info("Carregue dados.")
+        
+        if not df_cur.empty and 'Nome' in df_cur.columns and 'Cargo' in df_cur.columns:
+            # Dropdown de Filtro de Cargos
+            cargos_disponiveis = sorted(df_cur['Cargo'].unique())
+            cargo_filtro = st.selectbox("Selecione um Cargo para filtrar:", ["Todos"] + cargos_disponiveis)
+            
+            # Pega lista única de pessoas
+            df_pessoas = df_cur[['Nome', 'Cargo']].drop_duplicates().sort_values('Nome')
+            
+            # Aplica o filtro se não for "Todos"
+            if cargo_filtro != "Todos":
+                df_pessoas = df_pessoas[df_pessoas['Cargo'] == cargo_filtro]
+            
+            # Prepara os dados para o editor
+            lista_pessoas = []
+            for _, row in df_pessoas.iterrows():
+                nome = row['Nome']
+                lista_pessoas.append({
+                    "Nome": nome, 
+                    "Cargo": row['Cargo'], 
+                    "Área (Exceção)": mexc.get(nome, "")
+                })
+                
+            df_editor_pessoas = pd.DataFrame(lista_pessoas)
+            
+            edit_exc = st.data_editor(
+                df_editor_pessoas, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Nome": st.column_config.TextColumn(disabled=True),
+                    "Cargo": st.column_config.TextColumn(disabled=True)
+                }
+            )
+            
+            if st.button("💾 Salvar Exceções", type="primary"):
+                # Cria uma cópia do mapa atual para não deletar quem ficou escondido no filtro
+                mapa_final = mexc.copy()
+                
+                for _, r in edit_exc.iterrows():
+                    nome_pessoa = r['Nome']
+                    area_exc = r['Área (Exceção)']
+                    
+                    if area_exc and str(area_exc).strip() != "":
+                        mapa_final[nome_pessoa] = area_exc
+                    elif nome_pessoa in mapa_final:
+                        del mapa_final[nome_pessoa] # Remove do banco se o usuário apagou no editor
+                        
+                salvar_mapa_excecoes_mongo(mapa_final)
+                st.success("Exceções atualizadas com sucesso!")
+                time.sleep(1)
+                st.rerun()
+        else: 
+            st.info("Carregue dados no Dashboard para configurar exceções.")
 
 # ==============================================================================
 # ABA 4: ADMINISTRAÇÃO
@@ -535,8 +581,6 @@ if is_admin:
                     with ce2:
                         act = u.get('active', True)
                         if u['email'] != user['email']:
-                            # Botão secundário (Verde/Vermelho dependendo da ação?) 
-                            # Vamos manter o padrão, ou usar type="primary" para destaque
                             if st.button("🚫 Desativar" if act else "✅ Ativar", key=f"btn_{u['email']}"):
                                 atualizar_status_usuario(u['email'], not act)
                                 st.rerun()
