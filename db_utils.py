@@ -3,73 +3,107 @@ import pandas as pd
 import pymongo
 from pymongo import MongoClient, UpdateOne
 import bcrypt
-import datetime
 
 # --- CONEXÃO COM MONGODB ---
-# Usa st.cache_resource para manter a conexão aberta e não reconectar a cada clique
 @st.cache_resource
 def init_connection():
-    # Tenta pegar dos segredos (Nuvem) ou usa string vazia para forçar erro amigável
     uri = st.secrets.get("MONGO_URI", "")
-    if not uri:
-        return None
+    if not uri: return None
     return MongoClient(uri)
 
 def get_db():
     client = init_connection()
-    if client:
-        return client.get_database("financeiro_db") # Nome do seu banco
+    if client: return client.get_database("financeiro_db")
     return None
 
-# --- AUTENTICAÇÃO ---
-def verificar_login(email, senha):
-    db = get_db()
-    if db is None: return False
-    
-    usuario = db.users.find_one({"email": email})
-    if usuario:
-        # Verifica a senha criptografada
-        if bcrypt.checkpw(senha.encode('utf-8'), usuario['password']):
-            return usuario['name']
-    return None
+# --- GESTÃO DE USUÁRIOS (CRUD COMPLETO) ---
 
-def criar_usuario_admin(nome, email, senha):
-    """Função auxiliar para criar o primeiro usuário via script"""
+def criar_usuario(nome, email, senha, cargo='usuario', ativo=True):
     db = get_db()
     if db is None: return False
     
     hashed = bcrypt.hashpw(senha.encode('utf-8'), bcrypt.gensalt())
     
-    # Upsert: atualiza se existir, cria se não existir
-    db.users.update_one(
-        {"email": email},
-        {"$set": {"name": nome, "password": hashed, "email": email}},
-        upsert=True
-    )
+    try:
+        db.users.update_one(
+            {"email": email},
+            {"$set": {
+                "name": nome, 
+                "password": hashed, 
+                "email": email,
+                "role": cargo,   # 'admin' ou 'usuario'
+                "active": ativo
+            }},
+            upsert=True
+        )
+        return True
+    exceptException as e:
+        return False
+
+def verificar_login(email, senha):
+    db = get_db()
+    if db is None: return None
+    
+    usuario = db.users.find_one({"email": email})
+    
+    if usuario:
+        # Verifica se está ativo
+        if not usuario.get('active', True):
+            return "BLOQUEADO"
+            
+        if bcrypt.checkpw(senha.encode('utf-8'), usuario['password']):
+            # Retorna um dicionário com os dados do usuário
+            return {
+                "name": usuario['name'],
+                "role": usuario.get('role', 'usuario'),
+                "email": usuario['email']
+            }
+    return None
+
+def listar_todos_usuarios():
+    db = get_db()
+    if db is None: return []
+    # Retorna todos os usuários, ocultando a senha
+    return list(db.users.find({}, {"password": 0, "_id": 0}))
+
+def atualizar_status_usuario(email, novo_status_ativo):
+    """Ativa ou Desativa um usuário"""
+    db = get_db()
+    if db is None: return
+    db.users.update_one({"email": email}, {"$set": {"active": novo_status_ativo}})
+
+def atualizar_dados_usuario(email_antigo, novo_nome, novo_email, novo_cargo, nova_senha=None):
+    db = get_db()
+    if db is None: return False
+    
+    dados_atualizar = {
+        "name": novo_nome,
+        "email": novo_email,
+        "role": novo_cargo
+    }
+    
+    if nova_senha and len(nova_senha.strip()) > 0:
+        hashed = bcrypt.hashpw(nova_senha.encode('utf-8'), bcrypt.gensalt())
+        dados_atualizar["password"] = hashed
+    
+    # Se mudou o email, precisamos garantir que não duplique, então fazemos um update no ID ou find pelo email antigo
+    # Para simplificar aqui, vamos assumir update pelo email original
+    db.users.update_one({"email": email_antigo}, {"$set": dados_atualizar})
     return True
 
-# --- FUNÇÕES FINANCEIRAS (Substituindo Firestore) ---
-
+# --- FUNÇÕES FINANCEIRAS (MANTIDAS IGUAIS) ---
 def salvar_dados_mongo(df):
     db = get_db()
     if db is None: return 0
-    
     collection = db.folha_eventos
     operations = []
-    
-    # Prepara operações em lote (Bulk Write) para alta performance
     for _, row in df.iterrows():
-        # Cria um ID único igual ao que você usava no Firestore
         comp_safe = str(row['Competência']).replace('/', '-')
         evento_safe = "".join(c for c in str(row['Tipo de Evento']) if c.isalnum())
         doc_id = f"{row['Empresa']}_{comp_safe}_{row['ID Func']}_{evento_safe}"
-        
         dados = row.to_dict()
-        dados['_id'] = doc_id # Define o ID do MongoDB
-        
-        # ReplaceOne com upsert=True substitui o documento se o ID já existir
+        dados['_id'] = doc_id
         operations.append(UpdateOne({'_id': doc_id}, {'$set': dados}, upsert=True))
-    
     if operations:
         result = collection.bulk_write(operations)
         return result.upserted_count + result.modified_count
@@ -79,39 +113,22 @@ def salvar_dados_mongo(df):
 def carregar_filtros_mongo():
     db = get_db()
     if db is None: return [], []
-    
-    # Distinct é muito rápido no Mongo
     empresas = db.folha_eventos.distinct("Empresa")
     competencias = db.folha_eventos.distinct("Competência")
-    
     return sorted(empresas), sorted(competencias)
 
 @st.cache_data(ttl=600)
 def carregar_dados_mongo(empresas_sel, competencias_sel):
     db = get_db()
     if db is None: return pd.DataFrame()
-    
-    if not empresas_sel or not competencias_sel:
-        return pd.DataFrame()
-    
-    # Query otimizada com operador $in
-    query = {
-        "Empresa": {"$in": empresas_sel},
-        "Competência": {"$in": competencias_sel}
-    }
-    
+    if not empresas_sel or not competencias_sel: return pd.DataFrame()
+    query = {"Empresa": {"$in": empresas_sel}, "Competência": {"$in": competencias_sel}}
     cursor = db.folha_eventos.find(query)
     df = pd.DataFrame(list(cursor))
-    
-    # Remove a coluna interna do mongo _id para não atrapalhar
-    if not df.empty and '_id' in df.columns:
-        df = df.drop(columns=['_id'])
-        
+    if not df.empty and '_id' in df.columns: df = df.drop(columns=['_id'])
     return df
 
 # --- CONFIGURAÇÕES (CARGOS E EXCEÇÕES) ---
-# Salvamos isso em uma coleção chamada 'parametros'
-
 def carregar_mapa_cargos_mongo():
     db = get_db()
     if db is None: return {}
@@ -121,11 +138,7 @@ def carregar_mapa_cargos_mongo():
 def salvar_mapa_cargos_mongo(novo_mapa):
     db = get_db()
     if db is None: return
-    db.parametros.update_one(
-        {"_id": "mapeamento_areas"},
-        {"$set": {"mapa": novo_mapa}},
-        upsert=True
-    )
+    db.parametros.update_one({"_id": "mapeamento_areas"}, {"$set": {"mapa": novo_mapa}}, upsert=True)
 
 def carregar_mapa_excecoes_mongo():
     db = get_db()
@@ -136,8 +149,4 @@ def carregar_mapa_excecoes_mongo():
 def salvar_mapa_excecoes_mongo(novo_mapa):
     db = get_db()
     if db is None: return
-    db.parametros.update_one(
-        {"_id": "mapeamento_excecoes"},
-        {"$set": {"mapa": novo_mapa}},
-        upsert=True
-    )
+    db.parametros.update_one({"_id": "mapeamento_excecoes"}, {"$set": {"mapa": novo_mapa}}, upsert=True)
