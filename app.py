@@ -150,6 +150,11 @@ def processar_csv_financeiro(file_content, file_name):
 def aplicar_areas_otimizado(df, mapa_cargos, mapa_excecoes):
     if df.empty: return df
     df_out = df.copy()
+    
+    # Garante que as colunas existem antes de processar
+    if 'Cargo' not in df_out.columns: df_out['Cargo'] = ''
+    if 'Nome' not in df_out.columns: df_out['Nome'] = ''
+
     df_out['Area'] = df_out['Cargo'].map(mapa_cargos)
     excecoes_series = df_out['Nome'].map(mapa_excecoes)
     df_out['Area'] = excecoes_series.combine_first(df_out['Area'])
@@ -324,28 +329,46 @@ with abas[1]:
 # ==============================================================================
 with abas[2]:
     c1, c2 = st.columns(2)
+    
+    # Obtém o dataframe atual (pode estar vazio)
+    df_atual = st.session_state.get('df_financeiro', pd.DataFrame())
+    
     with c1:
         st.subheader("Cargos")
         mapa_cargos = carregar_mapa_cargos_mongo()
-        cargos = sorted(list(set(st.session_state.get('df_financeiro', pd.DataFrame()).get('Cargo', [])) | set(mapa_cargos.keys())))
-        if cargos:
-            df_cargos = pd.DataFrame([{"Cargo": c, "Area": mapa_cargos.get(c, "")} for c in cargos])
+        
+        # Só tenta buscar cargos se houver dados, senão usa apenas os já mapeados
+        cargos_existentes = []
+        if not df_atual.empty and 'Cargo' in df_atual.columns:
+            cargos_existentes = list(df_atual['Cargo'].unique())
+            
+        todos_cargos = sorted(list(set(cargos_existentes) | set(mapa_cargos.keys())))
+        
+        if todos_cargos:
+            df_cargos = pd.DataFrame([{"Cargo": c, "Area": mapa_cargos.get(c, "")} for c in todos_cargos])
             edited = st.data_editor(df_cargos, use_container_width=True, hide_index=True)
             if st.button("Salvar Cargos"):
                 novo_mapa = {row['Cargo']: row['Area'] for _, row in edited.iterrows() if row['Area']}
                 salvar_mapa_cargos_mongo(novo_mapa)
                 st.success("Salvo!")
+        else:
+            st.info("Nenhum cargo encontrado (carregue dados primeiro).")
+            
     with c2:
         st.subheader("Exceções (Pessoas)")
         mapa_excecoes = carregar_mapa_excecoes_mongo()
-        if 'df_financeiro' in st.session_state:
-            nomes = sorted(st.session_state['df_financeiro']['Nome'].unique())
+        
+        # Proteção para não dar erro se não houver dados carregados
+        if not df_atual.empty and 'Nome' in df_atual.columns:
+            nomes = sorted(df_atual['Nome'].unique())
             df_exc = pd.DataFrame([{"Nome": n, "Area Excecao": mapa_excecoes.get(n, "")} for n in nomes])
             edited_exc = st.data_editor(df_exc, use_container_width=True, hide_index=True)
             if st.button("Salvar Exceções"):
                 novo_mapa_exc = {row['Nome']: row['Area Excecao'] for _, row in edited_exc.iterrows() if row['Area Excecao']}
                 salvar_mapa_excecoes_mongo(novo_mapa_exc)
                 st.success("Salvo!")
+        else:
+            st.info("Carregue dados no Dashboard para configurar exceções de pessoas.")
 
 # ==============================================================================
 # ABA 4: ADMINISTRAÇÃO (Apenas Admin)
