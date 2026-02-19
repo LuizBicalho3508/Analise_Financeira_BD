@@ -1,0 +1,15 @@
+[theme]
+# Força o tema a ser sempre Light
+base = "light"
+
+# Muda a cor primária (que era vermelha) para o Azul da Brasil Digital
+primaryColor = "#002776"
+
+# Cor de fundo principal (Branco)
+backgroundColor = "#FFFFFF"
+
+# Cor de fundo secundária (Usada na barra lateral e nos fundos dos filtros)
+secondaryBackgroundColor = "#F0F2F6"
+
+# Cor do texto (Preto)
+textColor = "#000000"
