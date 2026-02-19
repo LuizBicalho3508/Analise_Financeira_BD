@@ -17,10 +17,9 @@ from db_utils import (
     atualizar_status_usuario,
     atualizar_dados_usuario
 )
-from relatorios import gerar_pdf_analitico, gerar_excel_personalizado
+from relatorios import gerar_pdf_analitico, gerar_pdf_cenarios, gerar_excel_personalizado
 
 # --- Configuração da Página ---
-# Aqui o layout="wide" força a tela larga permanentemente.
 st.set_page_config(
     page_title="Brasil Digital - Financeiro", 
     page_icon="📈", 
@@ -28,12 +27,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS Personalizado (Botões e Abas) ---
+# --- CSS Personalizado ---
 st.markdown("""
     <style>
-        /* Botões Padrão (Verde Brasil Digital) */
         div.stButton > button {
-            background-color: #009639; /* Verde */
+            background-color: #009639; 
             color: white;
             border: none;
             border-radius: 5px;
@@ -42,45 +40,36 @@ st.markdown("""
         div.stButton > button:hover {
             background-color: #007a2e;
             color: white;
-            border-color: #007a2e;
         }
         
-        /* Botões Primários (Azul Brasil Digital - Login, Salvar, Baixar) */
         div.stButton > button[kind="primary"] {
-            background-color: #002776; /* Azul */
+            background-color: #002776; 
             color: white;
-            border: none;
         }
         div.stButton > button[kind="primary"]:hover {
             background-color: #001b52;
-            color: white;
         }
 
-        /* Estilo da caixa de exportação */
         .export-box {
             border: 2px solid #002776;
             padding: 20px;
             border-radius: 10px;
             background-color: #f0f8ff;
             margin-bottom: 25px;
+            margin-top: 20px;
         }
 
-        /* Ajuste de Tabs (Abas Superiores) */
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 10px;
-        }
+        .stTabs [data-baseweb="tab-list"] { gap: 10px; }
         .stTabs [data-baseweb="tab"] {
             height: 50px;
             white-space: pre-wrap;
             background-color: #FFFFFF;
             border-radius: 4px 4px 0px 0px;
-            gap: 1px;
             padding-top: 10px;
             padding-bottom: 10px;
         }
         .stTabs [aria-selected="true"] {
-            background-color: #FFFFFF;
-            border-bottom: 2px solid #009639; /* Linha Verde na aba ativa */
+            border-bottom: 2px solid #009639; 
             color: #009639;
         }
     </style>
@@ -108,11 +97,11 @@ if not st.session_state['auth_status']:
             
             if submit:
                 if not st.secrets.get("MONGO_URI"):
-                    st.error("ERRO: MONGO_URI não configurada nos secrets.")
+                    st.error("ERRO: MONGO_URI não configurada.")
                 else:
                     user_data = verificar_login(email, senha)
                     if user_data == "BLOQUEADO":
-                        st.error("Este usuário foi desativado pelo administrador.")
+                        st.error("Usuário desativado.")
                     elif user_data:
                         st.session_state['auth_status'] = True
                         st.session_state['user_info'] = user_data
@@ -300,7 +289,6 @@ with abas[0]:
         if sel_eventos: df = df[df['Tipo de Evento'].isin(sel_eventos)]
 
         if not df.empty:
-            # Métricas
             total_custo = df['Valor (R$)'].sum()
             total_horas = df['Horas Decimais'].sum()
             qtd_colab = df['ID Func'].nunique()
@@ -312,7 +300,7 @@ with abas[0]:
             k3.metric("👥 Colaboradores", qtd_colab)
             k4.metric("📊 Ticket Médio", f"R$ {media:,.2f}")
 
-            # --- PREPARAÇÃO DOS GRÁFICOS ---
+            # Gráficos
             fig_area = px.bar(
                 df.groupby('Area')['Valor (R$)'].sum().reset_index().sort_values('Valor (R$)'), 
                 x='Valor (R$)', y='Area', orientation='h', title="Custo por Área",
@@ -338,7 +326,6 @@ with abas[0]:
             )
             fig_line.update_layout(xaxis=dict(type='category'))
 
-            # --- ÁREA DE EXPORTAÇÃO ---
             with st.container():
                 st.markdown("<div class='export-box'>", unsafe_allow_html=True)
                 st.markdown("### 📤 Central de Exportação")
@@ -353,14 +340,14 @@ with abas[0]:
                 
                 with col_exp1:
                     if st.button("📄 Baixar Relatório PDF (Analítico)", type="primary", use_container_width=True):
-                        with st.spinner("Renderizando gráficos para PDF..."):
+                        with st.spinner("Renderizando PDF..."):
                             pdf_bytes = gerar_pdf_analitico(df, metrics_export, [fig_area, fig_emp, fig_line], user['name'])
                             st.download_button("⬇️ Clique para Download PDF", data=pdf_bytes, file_name="relatorio_financeiro.pdf", mime="application/pdf", key="pdf_down")
                 
                 with col_exp2:
                     if st.button("📊 Baixar Excel Completo (XLSX)", type="primary", use_container_width=True):
                         with st.spinner("Gerando Excel..."):
-                            xls_bytes = gerar_excel_personalizado(df)
+                            xls_bytes = gerar_excel_personalizado(df, "Dados Financeiros")
                             st.download_button("⬇️ Clique para Download Excel", data=xls_bytes, file_name="dados_financeiros.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="xls_down")
                 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -399,8 +386,7 @@ with abas[0]:
                 pivot.columns = [f'{c[0]}|{c[1]}' for c in pivot.columns]
                 pivot = pivot.reset_index()
                 
-                cols_check = ['Horas Decimais|60%', 'Valor (R$)|60%', 'Horas Decimais|DSR', 'Valor (R$)|DSR']
-                for c in cols_check:
+                for c in ['Horas Decimais|60%', 'Valor (R$)|60%', 'Horas Decimais|DSR', 'Valor (R$)|DSR']:
                     if c not in pivot.columns: pivot[c] = 0.0
                 
                 cols_valor = [c for c in pivot.columns if 'Valor (R$)|' in c]
@@ -443,12 +429,60 @@ with abas[1]:
             final['Mensal'] = final['Pagar'] / mcash
             final['Dias'] = (final['Horas Decimais'] * (pfolga/100)) / 8
             
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Custo Total", f"R$ {final['Pagar'].sum():,.2f}")
-            k2.metric("Mensalidade", f"R$ {final['Mensal'].sum():,.2f}")
-            k3.metric("Dias Off", f"{final['Dias'].sum():,.1f}")
-            
-            st.dataframe(final.style.format({'Pagar': 'R$ {:,.2f}', 'Mensal': 'R$ {:,.2f}', 'Dias': '{:.1f}'}), use_container_width=True)
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Custo Total a Pagar", f"R$ {final['Pagar'].sum():,.2f}")
+            k2.metric("Mensalidade Projetada", f"R$ {final['Mensal'].sum():,.2f}")
+            k3.metric("Dias Off Totais", f"{final['Dias'].sum():,.1f}")
+            k4.metric("Pessoas Afetadas", str(len(final)))
+
+            # --- GRÁFICOS DO SIMULADOR ---
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                proj_cash = pd.DataFrame({
+                    'Mês': [f'Mês {i+1}' for i in range(int(mcash))],
+                    'Valor (R$)': [final['Pagar'].sum()/mcash] * int(mcash)
+                })
+                fig_proj1 = px.bar(proj_cash, x='Mês', y='Valor (R$)', text_auto='.2s', title=f"Desembolso de Pagamento em {int(mcash)}x", color_discrete_sequence=['#002776'])
+                st.plotly_chart(fig_proj1, use_container_width=True)
+
+            with col_g2:
+                proj_folga = pd.DataFrame({
+                    'Mês': [f'Mês {i+1}' for i in range(int(mfolga))],
+                    'Dias Off da Equipe': [final['Dias'].sum()/mfolga] * int(mfolga)
+                })
+                fig_proj2 = px.bar(proj_folga, x='Mês', y='Dias Off da Equipe', text_auto='.1f', title=f"Diluição de Folgas em {int(mfolga)} meses", color_discrete_sequence=['#009639'])
+                st.plotly_chart(fig_proj2, use_container_width=True)
+
+            # --- EXPORTAÇÃO CENÁRIOS ---
+            with st.container():
+                st.markdown("<div class='export-box'>", unsafe_allow_html=True)
+                st.markdown("### 📤 Exportar Simulação")
+                col_exp1, col_exp2 = st.columns(2)
+                
+                metrics_sim = {
+                    "Custo Total": f"R$ {final['Pagar'].sum():,.2f}",
+                    "Impacto Mensal": f"R$ {final['Mensal'].sum():,.2f}",
+                    "Total Dias Off": f"{final['Dias'].sum():,.1f}",
+                    "Pessoas Afetadas": str(len(final))
+                }
+                
+                with col_exp1:
+                    if st.button("📄 Baixar Relatório PDF (Cenários)", type="primary", use_container_width=True):
+                        with st.spinner("Gerando PDF..."):
+                            pdf_cen = gerar_pdf_cenarios(final, metrics_sim, [fig_proj1, fig_proj2], user['name'])
+                            st.download_button("⬇️ Clique para Download PDF Cenários", data=pdf_cen, file_name="simulacao_cenarios.pdf", mime="application/pdf", key="pdf_cen")
+                
+                with col_exp2:
+                    if st.button("📊 Baixar Excel Cenários (XLSX)", type="primary", use_container_width=True):
+                        with st.spinner("Gerando Excel..."):
+                            xls_cen = gerar_excel_personalizado(final, "Simulação Cenários")
+                            st.download_button("⬇️ Clique para Download Excel Cenários", data=xls_cen, file_name="simulacao_cenarios.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="xls_cen")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("### 📋 Detalhamento Individual")
+            df_show = final[['Nome', 'Empresa', 'Area', 'Horas Decimais', 'Pagar', 'Mensal', 'Dias']].copy()
+            df_show = df_show.sort_values('Pagar', ascending=False)
+            st.dataframe(df_show.style.format({'Pagar': 'R$ {:,.2f}', 'Mensal': 'R$ {:,.2f}', 'Dias': '{:.1f}'}), use_container_width=True, hide_index=True)
     else: st.info("Carregue dados no Dashboard primeiro.")
 
 # ==============================================================================
