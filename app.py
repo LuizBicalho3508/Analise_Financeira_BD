@@ -17,24 +17,81 @@ from db_utils import (
     atualizar_status_usuario,
     atualizar_dados_usuario
 )
-# Importa as novas funções de relatório
 from relatorios import gerar_pdf_analitico, gerar_excel_personalizado
 
 # --- Configuração da Página ---
-st.set_page_config(page_title="Brasil Digital - Financeiro", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="Brasil Digital - Financeiro", 
+    page_icon="📈", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- CSS Personalizado ---
+# --- CSS Personalizado (Cores e Tema Light) ---
 st.markdown("""
     <style>
-        [data-testid="stSidebar"] { background-color: #f0f2f6; }
-        .stButton>button { width: 100%; }
-        /* Estilo para área de exportação */
-        .export-box {
-            border: 1px solid #ddd;
-            padding: 15px;
+        /* Forçar Tema Claro no Fundo */
+        .stApp {
+            background-color: #FFFFFF;
+            color: #000000;
+        }
+        
+        /* Sidebar Levemente Cinza */
+        [data-testid="stSidebar"] {
+            background-color: #F8F9FA;
+        }
+
+        /* Botões Padrão (Verde Brasil Digital) */
+        div.stButton > button {
+            background-color: #009639; /* Verde */
+            color: white;
+            border: none;
             border-radius: 5px;
-            background-color: #f9f9f9;
-            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        div.stButton > button:hover {
+            background-color: #007a2e;
+            color: white;
+            border-color: #007a2e;
+        }
+        
+        /* Botões Primários (Azul Brasil Digital - Login, Salvar, Baixar) */
+        div.stButton > button[kind="primary"] {
+            background-color: #002776; /* Azul */
+            color: white;
+            border: none;
+        }
+        div.stButton > button[kind="primary"]:hover {
+            background-color: #001b52;
+            color: white;
+        }
+
+        /* Estilo da caixa de exportação */
+        .export-box {
+            border: 2px solid #002776;
+            padding: 20px;
+            border-radius: 10px;
+            background-color: #f0f8ff;
+            margin-bottom: 25px;
+        }
+
+        /* Ajuste de Tabs */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 10px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            white-space: pre-wrap;
+            background-color: #FFFFFF;
+            border-radius: 4px 4px 0px 0px;
+            gap: 1px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #FFFFFF;
+            border-bottom: 2px solid #009639;
+            color: #009639;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -53,10 +110,11 @@ if not st.session_state['auth_status']:
         try: st.image("logo-brasil-digital.png", width=300)
         except: st.header("Brasil Digital")
         
-        st.markdown("### Acesso Restrito")
+        st.markdown("<h3 style='text-align: center; color: #002776;'>Acesso Restrito</h3>", unsafe_allow_html=True)
         with st.form("login_form"):
             email = st.text_input("E-mail")
             senha = st.text_input("Senha", type="password")
+            # Botão Azul (Primary)
             submit = st.form_submit_button("Entrar", type="primary")
             
             if submit:
@@ -180,6 +238,7 @@ with st.sidebar:
     except: st.header("Brasil Digital")
     st.write(f"👤 **{user['name']}**")
     st.caption(f"Cargo: {user['role'].upper()}")
+    # Botão de Sair (Verde - Padrão do CSS)
     if st.button("Sair"):
         st.session_state['auth_status'] = False
         st.session_state['user_info'] = {}
@@ -202,7 +261,7 @@ with abas[0]:
         c1, c2 = st.columns(2)
         filtro_empresa_db = c1.multiselect("Empresas", opcoes_empresas, default=opcoes_empresas)
         filtro_competencia_db = c2.multiselect("Competências", opcoes_competencias, default=[opcoes_competencias[-1]] if opcoes_competencias else [])
-        if st.button("🔍 Buscar Dados"):
+        if st.button("🔍 Buscar Dados", type="primary"): # Botão Azul
             if not filtro_empresa_db or not filtro_competencia_db:
                 st.warning("Selecione Empresa e Competência.")
             else:
@@ -222,7 +281,7 @@ with abas[0]:
                 if not df_temp.empty:
                     st.session_state['df_financeiro'] = df_temp
                     st.success(f"{len(df_temp)} processados.")
-                    if st.button("💾 SALVAR NO BANCO", type="primary"):
+                    if st.button("💾 SALVAR NO BANCO", type="primary"): # Botão Azul
                         with st.spinner("Salvando..."):
                             total = salvar_dados_mongo(df_temp)
                         st.success(f"{total} salvos!")
@@ -265,12 +324,42 @@ with abas[0]:
             k3.metric("👥 Colaboradores", qtd_colab)
             k4.metric("📊 Ticket Médio", f"R$ {media:,.2f}")
 
+            # --- PREPARAÇÃO DOS GRÁFICOS PARA TELA E PDF ---
+            # 1. Por Área (Barra)
+            fig_area = px.bar(
+                df.groupby('Area')['Valor (R$)'].sum().reset_index().sort_values('Valor (R$)'), 
+                x='Valor (R$)', y='Area', orientation='h', title="Custo por Área",
+                color_discrete_sequence=['#002776'] # Azul
+            )
+            
+            # 2. Por Empresa (Pizza)
+            fig_emp = px.pie(
+                df.groupby('Empresa')['Valor (R$)'].sum().reset_index(), 
+                values='Valor (R$)', names='Empresa', title="Custo por Empresa",
+                color_discrete_sequence=px.colors.sequential.Blues_r
+            )
+
+            # 3. Evolução Temporal (Linha) - NOVO GRÁFICO
+            df_line = df.groupby('Competência')['Valor (R$)'].sum().reset_index()
+            # Ordenação correta de datas (MM/AAAA)
+            try:
+                df_line['Data_Ord'] = pd.to_datetime(df_line['Competência'], format='%m/%Y', errors='coerce')
+                df_line = df_line.sort_values('Data_Ord')
+            except: pass # Se der erro, mantem ordenação padrão
+            
+            fig_line = px.line(
+                df_line, x='Competência', y='Valor (R$)', markers=True, 
+                title="Evolução Mensal (Custo Total)",
+                color_discrete_sequence=['#009639'] # Verde
+            )
+            fig_line.update_layout(xaxis=dict(type='category')) # Garante ordem correta no eixo X
+
             # --- ÁREA DE EXPORTAÇÃO ---
             with st.container():
-                st.markdown("### 📤 Exportar Relatórios")
+                st.markdown("<div class='export-box'>", unsafe_allow_html=True)
+                st.markdown("### 📤 Central de Exportação")
                 col_exp1, col_exp2 = st.columns(2)
                 
-                # Prepara dados para exportação
                 metrics_export = {
                     "Custo Total": f"R$ {total_custo:,.2f}",
                     "Horas Totais": f"{total_horas:,.1f}",
@@ -278,31 +367,33 @@ with abas[0]:
                     "Ticket Medio": f"R$ {media:,.2f}"
                 }
                 
-                # Gera Gráficos para o PDF
-                fig_area = px.bar(df.groupby('Area')['Valor (R$)'].sum().reset_index().sort_values('Valor (R$)'), 
-                                  x='Valor (R$)', y='Area', orientation='h', title="Custo por Área")
-                fig_emp = px.pie(df.groupby('Empresa')['Valor (R$)'].sum().reset_index(), 
-                                 values='Valor (R$)', names='Empresa', title="Custo por Empresa")
-                
                 with col_exp1:
-                    if st.button("📄 Baixar Relatório PDF (Analítico)", use_container_width=True):
-                        with st.spinner("Gerando PDF..."):
-                            pdf_bytes = gerar_pdf_analitico(df, metrics_export, [fig_area, fig_emp], user['name'])
+                    # Botão Azul (Primary)
+                    if st.button("📄 Baixar Relatório PDF (Analítico)", type="primary", use_container_width=True):
+                        with st.spinner("Renderizando gráficos para PDF (isso pode levar alguns segundos)..."):
+                            # Passa a lista COM O NOVO GRÁFICO DE LINHA
+                            pdf_bytes = gerar_pdf_analitico(df, metrics_export, [fig_area, fig_emp, fig_line], user['name'])
                             st.download_button("⬇️ Clique para Download PDF", data=pdf_bytes, file_name="relatorio_financeiro.pdf", mime="application/pdf", key="pdf_down")
                 
                 with col_exp2:
-                    if st.button("📊 Baixar Excel Completo (XLSX)", use_container_width=True):
+                    # Botão Azul (Primary)
+                    if st.button("📊 Baixar Excel Completo (XLSX)", type="primary", use_container_width=True):
                         with st.spinner("Gerando Excel..."):
                             xls_bytes = gerar_excel_personalizado(df)
                             st.download_button("⬇️ Clique para Download Excel", data=xls_bytes, file_name="dados_financeiros.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="xls_down")
+                st.markdown("</div>", unsafe_allow_html=True)
 
             st.divider()
             subtab1, subtab2, subtab3 = st.tabs(["Visão Geral", "Inteligência", "Detalhado"])
             
             with subtab1:
+                # Linha Superior: Barras e Pizza
                 c_viz1, c_viz2 = st.columns(2)
                 c_viz1.plotly_chart(fig_area, use_container_width=True)
                 c_viz2.plotly_chart(fig_emp, use_container_width=True)
+                
+                # Linha Inferior: Novo Gráfico de Linha
+                st.plotly_chart(fig_line, use_container_width=True)
 
             with subtab2:
                 limite_horas = st.number_input("Alerta Horas >", value=100)
@@ -396,7 +487,7 @@ with abas[2]:
         all_c = sorted(list(set(cexist) | set(mcargos.keys())))
         if all_c:
             edit = st.data_editor(pd.DataFrame([{"Cargo": c, "Area": mcargos.get(c, "")} for c in all_c]), use_container_width=True, hide_index=True)
-            if st.button("Salvar Cargos"):
+            if st.button("Salvar Cargos", type="primary"):
                 salvar_mapa_cargos_mongo({r['Cargo']: r['Area'] for _, r in edit.iterrows() if r['Area']})
                 st.success("Salvo!")
     
@@ -406,7 +497,7 @@ with abas[2]:
         if not df_cur.empty and 'Nome' in df_cur.columns:
             nomes = sorted(df_cur['Nome'].unique())
             edit_exc = st.data_editor(pd.DataFrame([{"Nome": n, "Area Excecao": mexc.get(n, "")} for n in nomes]), use_container_width=True, hide_index=True)
-            if st.button("Salvar Exceções"):
+            if st.button("Salvar Exceções", type="primary"):
                 salvar_mapa_excecoes_mongo({r['Nome']: r['Area Excecao'] for _, r in edit_exc.iterrows() if r['Area Excecao']})
                 st.success("Salvo!")
         else: st.info("Carregue dados.")
@@ -424,7 +515,7 @@ if is_admin:
                 ne = st.text_input("Email")
                 np = st.text_input("Senha", type="password")
                 nr = st.selectbox("Cargo", ["usuario", "admin"])
-                if st.form_submit_button("Criar"):
+                if st.form_submit_button("Criar", type="primary"):
                     if criar_usuario(nn, ne, np, nr): st.success("Criado!"); time.sleep(1); st.rerun()
                     else: st.error("Erro")
         
@@ -438,12 +529,14 @@ if is_admin:
                             en = st.text_input("Nome", u['name'])
                             er = st.selectbox("Cargo", ["usuario", "admin"], index=0 if u['role']=='usuario' else 1)
                             ep = st.text_input("Nova Senha", type="password")
-                            if st.form_submit_button("Salvar"):
+                            if st.form_submit_button("Salvar", type="primary"):
                                 atualizar_dados_usuario(u['email'], en, u['email'], er, ep)
                                 st.success("OK!"); time.sleep(1); st.rerun()
                     with ce2:
                         act = u.get('active', True)
                         if u['email'] != user['email']:
+                            # Botão secundário (Verde/Vermelho dependendo da ação?) 
+                            # Vamos manter o padrão, ou usar type="primary" para destaque
                             if st.button("🚫 Desativar" if act else "✅ Ativar", key=f"btn_{u['email']}"):
                                 atualizar_status_usuario(u['email'], not act)
                                 st.rerun()
