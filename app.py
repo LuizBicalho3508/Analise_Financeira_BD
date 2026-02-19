@@ -30,48 +30,29 @@ st.set_page_config(
 # --- CSS Personalizado ---
 st.markdown("""
     <style>
+        .stApp { background-color: #FFFFFF; color: #000000; }
+        [data-testid="stSidebar"] { background-color: #F8F9FA; }
+
         div.stButton > button {
             background-color: #009639; 
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-weight: bold;
+            color: white; border: none; border-radius: 5px; font-weight: bold;
         }
-        div.stButton > button:hover {
-            background-color: #007a2e;
-            color: white;
-        }
+        div.stButton > button:hover { background-color: #007a2e; color: white; border-color: #007a2e; }
         
-        div.stButton > button[kind="primary"] {
-            background-color: #002776; 
-            color: white;
-        }
-        div.stButton > button[kind="primary"]:hover {
-            background-color: #001b52;
-        }
+        div.stButton > button[kind="primary"] { background-color: #002776; color: white; border: none; }
+        div.stButton > button[kind="primary"]:hover { background-color: #001b52; color: white; }
 
         .export-box {
-            border: 2px solid #002776;
-            padding: 20px;
-            border-radius: 10px;
-            background-color: #f0f8ff;
-            margin-bottom: 25px;
-            margin-top: 20px;
+            border: 2px solid #002776; padding: 20px; border-radius: 10px;
+            background-color: #f0f8ff; margin-bottom: 25px; margin-top: 20px;
         }
 
         .stTabs [data-baseweb="tab-list"] { gap: 10px; }
         .stTabs [data-baseweb="tab"] {
-            height: 50px;
-            white-space: pre-wrap;
-            background-color: #FFFFFF;
-            border-radius: 4px 4px 0px 0px;
-            padding-top: 10px;
-            padding-bottom: 10px;
+            height: 50px; white-space: pre-wrap; background-color: #FFFFFF;
+            border-radius: 4px 4px 0px 0px; padding-top: 10px; padding-bottom: 10px;
         }
-        .stTabs [aria-selected="true"] {
-            border-bottom: 2px solid #009639; 
-            color: #009639;
-        }
+        .stTabs [aria-selected="true"] { border-bottom: 2px solid #009639; color: #009639; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -97,11 +78,11 @@ if not st.session_state['auth_status']:
             
             if submit:
                 if not st.secrets.get("MONGO_URI"):
-                    st.error("ERRO: MONGO_URI não configurada.")
+                    st.error("ERRO: MONGO_URI não configurada nos secrets.")
                 else:
                     user_data = verificar_login(email, senha)
                     if user_data == "BLOQUEADO":
-                        st.error("Usuário desativado.")
+                        st.error("Este usuário foi desativado pelo administrador.")
                     elif user_data:
                         st.session_state['auth_status'] = True
                         st.session_state['user_info'] = user_data
@@ -408,11 +389,11 @@ with abas[1]:
     if 'df_com_areas' in st.session_state:
         df_base = st.session_state['df_com_areas'].copy()
         with st.container(border=True):
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
                 areas = sorted(df_base['Area'].unique())
                 target = st.multiselect("Áreas Alvo", areas, default=areas)
-                th = st.number_input("Saldo > X horas:", value=40)
+                th = st.number_input("Saldo > X horas:", value=40.0)
             with c2:
                 pcash = st.slider("% Pagar", 0, 100, 50)
                 mcash = st.number_input("Parcelas Pagamento", 1, 24, 3)
@@ -420,14 +401,20 @@ with abas[1]:
                 pfolga = 100 - pcash
                 st.info(f"% Folgar: {pfolga}%")
                 mfolga = st.number_input("Meses Folga", 1, 24, 6)
+            with c4:
+                st.markdown("**Regra de Conversão**")
+                # NOVO: Permite definir exatamente quantas horas vale 1 dia de folga
+                horas_por_dia = st.number_input("1 Dia = X Horas:", value=8.0, step=0.1)
         
         agg = df_base.groupby(['Nome', 'Empresa', 'Area']).agg({'Horas Decimais': 'sum', 'Valor (R$)': 'sum'}).reset_index()
         final = agg[(agg['Horas Decimais'] >= th) & (agg['Area'].isin(target))].copy()
         
         if not final.empty:
-            final['Pagar'] = final['Valor (R$)'] * (pcash/100)
-            final['Mensal'] = final['Pagar'] / mcash
-            final['Dias'] = (final['Horas Decimais'] * (pfolga/100)) / 8
+            # CORREÇÃO CRÍTICA: O round(2) direto na fonte mata o problema de dezenas de decimais no Copy Paste do Excel
+            final['Pagar'] = (final['Valor (R$)'] * (pcash/100)).round(2)
+            final['Mensal'] = (final['Pagar'] / mcash).round(2)
+            final['Dias'] = ((final['Horas Decimais'] * (pfolga/100)) / horas_por_dia).round(2)
+            final['Horas Decimais'] = final['Horas Decimais'].round(2)
             
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Custo Total a Pagar", f"R$ {final['Pagar'].sum():,.2f}")
@@ -435,7 +422,6 @@ with abas[1]:
             k3.metric("Dias Off Totais", f"{final['Dias'].sum():,.1f}")
             k4.metric("Pessoas Afetadas", str(len(final)))
 
-            # --- GRÁFICOS DO SIMULADOR ---
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 proj_cash = pd.DataFrame({
@@ -453,7 +439,6 @@ with abas[1]:
                 fig_proj2 = px.bar(proj_folga, x='Mês', y='Dias Off da Equipe', text_auto='.1f', title=f"Diluição de Folgas em {int(mfolga)} meses", color_discrete_sequence=['#009639'])
                 st.plotly_chart(fig_proj2, use_container_width=True)
 
-            # --- EXPORTAÇÃO CENÁRIOS ---
             with st.container():
                 st.markdown("<div class='export-box'>", unsafe_allow_html=True)
                 st.markdown("### 📤 Exportar Simulação")
@@ -480,9 +465,20 @@ with abas[1]:
                 st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown("### 📋 Detalhamento Individual")
-            df_show = final[['Nome', 'Empresa', 'Area', 'Horas Decimais', 'Pagar', 'Mensal', 'Dias']].copy()
-            df_show = df_show.sort_values('Pagar', ascending=False)
-            st.dataframe(df_show.style.format({'Pagar': 'R$ {:,.2f}', 'Mensal': 'R$ {:,.2f}', 'Dias': '{:.1f}'}), use_container_width=True, hide_index=True)
+            df_show = final[['Nome', 'Empresa', 'Area', 'Horas Decimais', 'Pagar', 'Mensal', 'Dias']].copy().sort_values('Pagar', ascending=False)
+            
+            # Configuração otimizada para visualização E cópia correta
+            st.dataframe(
+                df_show,
+                column_config={
+                    "Horas Decimais": st.column_config.NumberColumn("Horas Decimais", format="%.2f"),
+                    "Pagar": st.column_config.NumberColumn("Pagar Total (R$)", format="R$ %.2f"),
+                    "Mensal": st.column_config.NumberColumn("Mensalidade (R$)", format="R$ %.2f"),
+                    "Dias": st.column_config.NumberColumn("Dias Off", format="%.2f")
+                },
+                use_container_width=True, 
+                hide_index=True
+            )
     else: st.info("Carregue dados no Dashboard primeiro.")
 
 # ==============================================================================
