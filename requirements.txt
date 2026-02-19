@@ -1,0 +1,6 @@
+streamlit
+pandas
+pymongo
+plotly
+bcrypt
+dnspython
