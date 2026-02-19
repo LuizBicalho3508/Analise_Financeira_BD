@@ -151,7 +151,6 @@ def aplicar_areas_otimizado(df, mapa_cargos, mapa_excecoes):
     if df.empty: return df
     df_out = df.copy()
     
-    # Garante que as colunas existem antes de processar
     if 'Cargo' not in df_out.columns: df_out['Cargo'] = ''
     if 'Nome' not in df_out.columns: df_out['Nome'] = ''
 
@@ -284,7 +283,61 @@ with abas[0]:
                 else: st.success("Ninguém acima do limite.")
 
             with subtab3:
-                st.dataframe(df, use_container_width=True)
+                # --- Lógica de Tabela Detalhada com Pivot ---
+                def cat_evento(e):
+                    e = str(e).upper()
+                    if "60%" in e: return "60%"
+                    if "DSR" in e: return "DSR"
+                    return "OUTROS"
+                
+                df_detalhe = df.copy()
+                df_detalhe['Cat'] = df_detalhe['Tipo de Evento'].apply(cat_evento)
+                
+                # Pivot para organizar colunas
+                pivot = df_detalhe.pivot_table(
+                    index=['ID Func', 'Nome', 'Cargo'], 
+                    columns='Cat', 
+                    values=['Horas Decimais', 'Valor (R$)'], 
+                    aggfunc='sum', 
+                    fill_value=0
+                )
+                
+                # Achatando colunas (MultiIndex)
+                pivot.columns = [f'{c[0]}|{c[1]}' for c in pivot.columns]
+                pivot = pivot.reset_index()
+                
+                # Garante colunas necessárias
+                cols_check = ['Horas Decimais|60%', 'Valor (R$)|60%', 'Horas Decimais|DSR', 'Valor (R$)|DSR']
+                for c in cols_check:
+                    if c not in pivot.columns: pivot[c] = 0.0
+                
+                # Cálculos e Formatações
+                cols_valor = [c for c in pivot.columns if 'Valor (R$)|' in c]
+                pivot['Total Geral (R$)'] = pivot[cols_valor].sum(axis=1)
+                
+                pivot['Banco 60%'] = pivot['Horas Decimais|60%'].apply(formatar_horas_decimal_para_str)
+                pivot['Horas DSR'] = pivot['Horas Decimais|DSR'].apply(formatar_horas_decimal_para_str)
+                
+                # Seleção e Ordem Final
+                cols_final = [
+                    'ID Func', 'Nome', 'Cargo', 
+                    'Banco 60%', 'Valor (R$)|60%', 
+                    'Horas DSR', 'Valor (R$)|DSR', 
+                    'Total Geral (R$)'
+                ]
+                # Filtro de segurança (caso alguma coluna não tenha sido gerada)
+                cols_final = [c for c in cols_final if c in pivot.columns]
+                
+                # Exibição
+                st.dataframe(
+                    pivot[cols_final].style.format({
+                        "Valor (R$)|60%": "R$ {:,.2f}", 
+                        "Valor (R$)|DSR": "R$ {:,.2f}", 
+                        "Total Geral (R$)": "R$ {:,.2f}"
+                    }),
+                    use_container_width=True,
+                    hide_index=True  # Remove a coluna de índice
+                )
 
 # ==============================================================================
 # ABA 2: CENÁRIOS
@@ -329,15 +382,12 @@ with abas[1]:
 # ==============================================================================
 with abas[2]:
     c1, c2 = st.columns(2)
-    
-    # Obtém o dataframe atual (pode estar vazio)
     df_atual = st.session_state.get('df_financeiro', pd.DataFrame())
     
     with c1:
         st.subheader("Cargos")
         mapa_cargos = carregar_mapa_cargos_mongo()
         
-        # Só tenta buscar cargos se houver dados, senão usa apenas os já mapeados
         cargos_existentes = []
         if not df_atual.empty and 'Cargo' in df_atual.columns:
             cargos_existentes = list(df_atual['Cargo'].unique())
@@ -358,7 +408,6 @@ with abas[2]:
         st.subheader("Exceções (Pessoas)")
         mapa_excecoes = carregar_mapa_excecoes_mongo()
         
-        # Proteção para não dar erro se não houver dados carregados
         if not df_atual.empty and 'Nome' in df_atual.columns:
             nomes = sorted(df_atual['Nome'].unique())
             df_exc = pd.DataFrame([{"Nome": n, "Area Excecao": mapa_excecoes.get(n, "")} for n in nomes])
