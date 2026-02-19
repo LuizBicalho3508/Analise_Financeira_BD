@@ -20,6 +20,7 @@ from db_utils import (
 from relatorios import gerar_pdf_analitico, gerar_excel_personalizado
 
 # --- Configuração da Página ---
+# Aqui o layout="wide" força a tela larga permanentemente.
 st.set_page_config(
     page_title="Brasil Digital - Financeiro", 
     page_icon="📈", 
@@ -27,20 +28,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS Personalizado (Cores e Tema Light) ---
+# --- CSS Personalizado (Botões e Abas) ---
 st.markdown("""
     <style>
-        /* Forçar Tema Claro no Fundo */
-        .stApp {
-            background-color: #FFFFFF;
-            color: #000000;
-        }
-        
-        /* Sidebar Levemente Cinza */
-        [data-testid="stSidebar"] {
-            background-color: #F8F9FA;
-        }
-
         /* Botões Padrão (Verde Brasil Digital) */
         div.stButton > button {
             background-color: #009639; /* Verde */
@@ -75,7 +65,7 @@ st.markdown("""
             margin-bottom: 25px;
         }
 
-        /* Ajuste de Tabs */
+        /* Ajuste de Tabs (Abas Superiores) */
         .stTabs [data-baseweb="tab-list"] {
             gap: 10px;
         }
@@ -90,7 +80,7 @@ st.markdown("""
         }
         .stTabs [aria-selected="true"] {
             background-color: #FFFFFF;
-            border-bottom: 2px solid #009639;
+            border-bottom: 2px solid #009639; /* Linha Verde na aba ativa */
             color: #009639;
         }
     </style>
@@ -462,13 +452,12 @@ with abas[1]:
     else: st.info("Carregue dados no Dashboard primeiro.")
 
 # ==============================================================================
-# ABA 3: CONFIGURAÇÃO DE ÁREAS (Com filtro restaurado)
+# ABA 3: CONFIGURAÇÃO DE ÁREAS
 # ==============================================================================
 with abas[2]:
     c1, c2 = st.columns(2)
     df_cur = st.session_state.get('df_financeiro', pd.DataFrame())
     
-    # --- 1. CONFIGURAÇÃO POR CARGO ---
     with c1:
         st.subheader("1. Configuração por Cargos")
         mcargos = carregar_mapa_cargos_mongo()
@@ -489,24 +478,19 @@ with abas[2]:
         else:
             st.info("Nenhum cargo encontrado (carregue dados primeiro).")
     
-    # --- 2. CONFIGURAÇÃO POR EXCEÇÃO (PESSOAS) COM FILTRO ---
     with c2:
         st.subheader("2. Exceções (Por Pessoa)")
         mexc = carregar_mapa_excecoes_mongo()
         
         if not df_cur.empty and 'Nome' in df_cur.columns and 'Cargo' in df_cur.columns:
-            # Dropdown de Filtro de Cargos
             cargos_disponiveis = sorted(df_cur['Cargo'].unique())
             cargo_filtro = st.selectbox("Selecione um Cargo para filtrar:", ["Todos"] + cargos_disponiveis)
             
-            # Pega lista única de pessoas
             df_pessoas = df_cur[['Nome', 'Cargo']].drop_duplicates().sort_values('Nome')
             
-            # Aplica o filtro se não for "Todos"
             if cargo_filtro != "Todos":
                 df_pessoas = df_pessoas[df_pessoas['Cargo'] == cargo_filtro]
             
-            # Prepara os dados para o editor
             lista_pessoas = []
             for _, row in df_pessoas.iterrows():
                 nome = row['Nome']
@@ -529,7 +513,6 @@ with abas[2]:
             )
             
             if st.button("💾 Salvar Exceções", type="primary"):
-                # Cria uma cópia do mapa atual para não deletar quem ficou escondido no filtro
                 mapa_final = mexc.copy()
                 
                 for _, r in edit_exc.iterrows():
@@ -539,7 +522,7 @@ with abas[2]:
                     if area_exc and str(area_exc).strip() != "":
                         mapa_final[nome_pessoa] = area_exc
                     elif nome_pessoa in mapa_final:
-                        del mapa_final[nome_pessoa] # Remove do banco se o usuário apagou no editor
+                        del mapa_final[nome_pessoa]
                         
                 salvar_mapa_excecoes_mongo(mapa_final)
                 st.success("Exceções atualizadas com sucesso!")
