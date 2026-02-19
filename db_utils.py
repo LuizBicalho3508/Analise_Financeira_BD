@@ -3,7 +3,7 @@ import pandas as pd
 import pymongo
 from pymongo import MongoClient, UpdateOne
 import bcrypt
-import certifi  # <--- NOVA IMPORTAÇÃO ESSENCIAL
+import certifi  # Importação obrigatória para corrigir o erro SSL
 
 # --- CONEXÃO COM MONGODB ---
 @st.cache_resource
@@ -11,9 +11,7 @@ def init_connection():
     uri = st.secrets.get("MONGO_URI", "")
     if not uri: return None
     
-    # CORREÇÃO DO ERRO DE SSL:
-    # Adicionamos tlsCAFile=certifi.where() para garantir que o Streamlit
-    # tenha os certificados de segurança corretos para falar com o Atlas.
+    # tlsCAFile=certifi.where() é a "vacina" para o erro de SSL no Streamlit Cloud
     return MongoClient(uri, tlsCAFile=certifi.where())
 
 def get_db():
@@ -21,7 +19,7 @@ def get_db():
     if client: return client.get_database("financeiro_db")
     return None
 
-# --- GESTÃO DE USUÁRIOS (CRUD COMPLETO) ---
+# --- GESTÃO DE USUÁRIOS ---
 
 def criar_usuario(nome, email, senha, cargo='usuario', ativo=True):
     db = get_db()
@@ -36,13 +34,14 @@ def criar_usuario(nome, email, senha, cargo='usuario', ativo=True):
                 "name": nome, 
                 "password": hashed, 
                 "email": email,
-                "role": cargo,   # 'admin' ou 'usuario'
+                "role": cargo,
                 "active": ativo
             }},
             upsert=True
         )
         return True
     except Exception as e:
+        print(f"Erro ao criar usuário: {e}")
         return False
 
 def verificar_login(email, senha):
@@ -53,18 +52,17 @@ def verificar_login(email, senha):
         usuario = db.users.find_one({"email": email})
         
         if usuario:
-            # Verifica se está ativo
             if not usuario.get('active', True):
                 return "BLOQUEADO"
                 
             if bcrypt.checkpw(senha.encode('utf-8'), usuario['password']):
-                # Retorna um dicionário com os dados do usuário
                 return {
                     "name": usuario['name'],
                     "role": usuario.get('role', 'usuario'),
                     "email": usuario['email']
                 }
-    except Exception:
+    except Exception as e:
+        print(f"Erro no login: {e}")
         return None
     return None
 
@@ -76,7 +74,6 @@ def listar_todos_usuarios():
     except: return []
 
 def atualizar_status_usuario(email, novo_status_ativo):
-    """Ativa ou Desativa um usuário"""
     db = get_db()
     if db is None: return
     try:
@@ -109,13 +106,24 @@ def salvar_dados_mongo(df):
     if db is None: return 0
     collection = db.folha_eventos
     operations = []
+    
+    # Garante que colunas numéricas existam
+    if 'Valor (R$)' not in df.columns: df['Valor (R$)'] = 0.0
+    if 'Horas Decimais' not in df.columns: df['Horas Decimais'] = 0.0
+
     for _, row in df.iterrows():
-        comp_safe = str(row['Competência']).replace('/', '-')
-        evento_safe = "".join(c for c in str(row['Tipo de Evento']) if c.isalnum())
-        doc_id = f"{row['Empresa']}_{comp_safe}_{row['ID Func']}_{evento_safe}"
-        dados = row.to_dict()
-        dados['_id'] = doc_id
-        operations.append(UpdateOne({'_id': doc_id}, {'$set': dados}, upsert=True))
+        try:
+            comp_safe = str(row['Competência']).replace('/', '-')
+            evento_safe = "".join(c for c in str(row['Tipo de Evento']) if c.isalnum())
+            doc_id = f"{row['Empresa']}_{comp_safe}_{row['ID Func']}_{evento_safe}"
+            
+            # Converte para dicionário e trata tipos incompatíveis com Mongo (ex: float do numpy)
+            dados = row.to_dict()
+            dados['_id'] = doc_id
+            
+            operations.append(UpdateOne({'_id': doc_id}, {'$set': dados}, upsert=True))
+        except: continue
+
     if operations:
         try:
             result = collection.bulk_write(operations)
@@ -131,8 +139,7 @@ def carregar_filtros_mongo():
         empresas = db.folha_eventos.distinct("Empresa")
         competencias = db.folha_eventos.distinct("Competência")
         return sorted(empresas), sorted(competencias)
-    except:
-        return [], []
+    except: return [], []
 
 @st.cache_data(ttl=600)
 def carregar_dados_mongo(empresas_sel, competencias_sel):
@@ -148,7 +155,7 @@ def carregar_dados_mongo(empresas_sel, competencias_sel):
         return df
     except: return pd.DataFrame()
 
-# --- CONFIGURAÇÕES (CARGOS E EXCEÇÕES) ---
+# --- CONFIGURAÇÕES ---
 
 def carregar_mapa_cargos_mongo():
     db = get_db()
