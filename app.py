@@ -17,6 +17,8 @@ from db_utils import (
     atualizar_status_usuario,
     atualizar_dados_usuario
 )
+# Importa as novas funções de relatório
+from relatorios import gerar_pdf_analitico, gerar_excel_personalizado
 
 # --- Configuração da Página ---
 st.set_page_config(page_title="Brasil Digital - Financeiro", page_icon="📈", layout="wide")
@@ -26,6 +28,14 @@ st.markdown("""
     <style>
         [data-testid="stSidebar"] { background-color: #f0f2f6; }
         .stButton>button { width: 100%; }
+        /* Estilo para área de exportação */
+        .export-box {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            margin-bottom: 20px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -65,7 +75,7 @@ if not st.session_state['auth_status']:
     st.stop()
 
 # ==============================================================================
-# FUNÇÕES DE PROCESSAMENTO E CALCULOS
+# FUNÇÕES DE PROCESSAMENTO
 # ==============================================================================
 @st.cache_data
 def converter_valor_monetario(valor_str):
@@ -150,7 +160,6 @@ def processar_csv_financeiro(file_content, file_name):
 def aplicar_areas_otimizado(df, mapa_cargos, mapa_excecoes):
     if df.empty: return df
     df_out = df.copy()
-    
     if 'Cargo' not in df_out.columns: df_out['Cargo'] = ''
     if 'Nome' not in df_out.columns: df_out['Nome'] = ''
 
@@ -166,25 +175,19 @@ def aplicar_areas_otimizado(df, mapa_cargos, mapa_excecoes):
 user = st.session_state['user_info']
 is_admin = user.get('role') == 'admin'
 
-# --- Sidebar ---
 with st.sidebar:
     try: st.image("logo-brasil-digital.png", use_container_width=True)
     except: st.header("Brasil Digital")
-    
     st.write(f"👤 **{user['name']}**")
     st.caption(f"Cargo: {user['role'].upper()}")
-    
     if st.button("Sair"):
         st.session_state['auth_status'] = False
         st.session_state['user_info'] = {}
         st.rerun()
     st.divider()
 
-# --- Abas ---
 abas_titulos = ["📈 Dashboard Analítico", "🔮 Cenários", "⚙️ Configuração de Áreas"]
-if is_admin:
-    abas_titulos.append("🔐 Administração")
-
+if is_admin: abas_titulos.append("🔐 Administração")
 abas = st.tabs(abas_titulos)
 
 # ==============================================================================
@@ -196,40 +199,35 @@ with abas[0]:
     if modo_uso == "🗄️ Consultar Banco de Dados":
         with st.spinner("Conectando ao banco..."):
             opcoes_empresas, opcoes_competencias = carregar_filtros_mongo()
-        
-        c_filt1, c_filt2 = st.columns(2)
-        filtro_empresa_db = c_filt1.multiselect("Empresas", opcoes_empresas, default=opcoes_empresas)
-        filtro_competencia_db = c_filt2.multiselect("Competências", opcoes_competencias, default=[opcoes_competencias[-1]] if opcoes_competencias else [])
-
+        c1, c2 = st.columns(2)
+        filtro_empresa_db = c1.multiselect("Empresas", opcoes_empresas, default=opcoes_empresas)
+        filtro_competencia_db = c2.multiselect("Competências", opcoes_competencias, default=[opcoes_competencias[-1]] if opcoes_competencias else [])
         if st.button("🔍 Buscar Dados"):
             if not filtro_empresa_db or not filtro_competencia_db:
                 st.warning("Selecione Empresa e Competência.")
             else:
-                with st.spinner("Buscando dados no MongoDB..."):
+                with st.spinner("Buscando..."):
                     df_temp = carregar_dados_mongo(filtro_empresa_db, filtro_competencia_db)
-                    if df_temp.empty:
-                        st.warning("Nenhum dado encontrado.")
-                    else:
+                    if not df_temp.empty:
                         st.session_state['df_financeiro'] = df_temp
                         st.success(f"{len(df_temp)} registros carregados!")
+                    else: st.warning("Nenhum dado encontrado.")
     else:
         uploaded_files = st.file_uploader("Carregar CSVs", type=["csv"], accept_multiple_files=True)
         if uploaded_files:
             dfs = []
-            for file in uploaded_files:
-                dfs.append(processar_csv_financeiro(file.getvalue(), file.name))
+            for file in uploaded_files: dfs.append(processar_csv_financeiro(file.getvalue(), file.name))
             if dfs:
                 df_temp = pd.concat(dfs, ignore_index=True)
                 if not df_temp.empty:
                     st.session_state['df_financeiro'] = df_temp
                     st.success(f"{len(df_temp)} processados.")
-                    if st.button("💾 SALVAR NO BANCO DE DADOS", type="primary"):
+                    if st.button("💾 SALVAR NO BANCO", type="primary"):
                         with st.spinner("Salvando..."):
                             total = salvar_dados_mongo(df_temp)
-                        st.success(f"{total} registros salvos/atualizados!")
+                        st.success(f"{total} salvos!")
                         carregar_filtros_mongo.clear()
 
-    # Visualização
     if 'df_financeiro' in st.session_state and not st.session_state['df_financeiro'].empty:
         mapa_cargos = carregar_mapa_cargos_mongo()
         mapa_excecoes = carregar_mapa_excecoes_mongo()
@@ -237,17 +235,17 @@ with abas[0]:
         st.session_state['df_com_areas'] = df_full
 
         st.divider()
-        with st.expander("🔎 Refinar Visualização (Filtros Locais)", expanded=True):
-            f_col1, f_col2, f_col3 = st.columns(3)
+        with st.expander("🔎 Filtros Locais", expanded=True):
+            f1, f2, f3 = st.columns(3)
             areas_disp = sorted(df_full['Area'].unique())
-            sel_areas = f_col1.multiselect("Filtrar Áreas", areas_disp, default=areas_disp)
+            sel_areas = f1.multiselect("Filtrar Áreas", areas_disp, default=areas_disp)
             
-            df_area_filtered = df_full[df_full['Area'].isin(sel_areas)] if sel_areas else df_full
-            cargos_disp = sorted(df_area_filtered['Cargo'].unique())
-            sel_cargos = f_col2.multiselect("Filtrar Cargos", cargos_disp, default=cargos_disp)
+            df_filtered = df_full[df_full['Area'].isin(sel_areas)] if sel_areas else df_full
+            cargos_disp = sorted(df_filtered['Cargo'].unique())
+            sel_cargos = f2.multiselect("Filtrar Cargos", cargos_disp, default=cargos_disp)
             
             eventos_disp = sorted(df_full['Tipo de Evento'].unique())
-            sel_eventos = f_col3.multiselect("Filtrar Eventos", eventos_disp, default=eventos_disp)
+            sel_eventos = f3.multiselect("Filtrar Eventos", eventos_disp, default=eventos_disp)
 
         df = df_full.copy()
         if sel_areas: df = df[df['Area'].isin(sel_areas)]
@@ -255,6 +253,7 @@ with abas[0]:
         if sel_eventos: df = df[df['Tipo de Evento'].isin(sel_eventos)]
 
         if not df.empty:
+            # Métricas
             total_custo = df['Valor (R$)'].sum()
             total_horas = df['Horas Decimais'].sum()
             qtd_colab = df['ID Func'].nunique()
@@ -266,12 +265,44 @@ with abas[0]:
             k3.metric("👥 Colaboradores", qtd_colab)
             k4.metric("📊 Ticket Médio", f"R$ {media:,.2f}")
 
+            # --- ÁREA DE EXPORTAÇÃO ---
+            with st.container():
+                st.markdown("### 📤 Exportar Relatórios")
+                col_exp1, col_exp2 = st.columns(2)
+                
+                # Prepara dados para exportação
+                metrics_export = {
+                    "Custo Total": f"R$ {total_custo:,.2f}",
+                    "Horas Totais": f"{total_horas:,.1f}",
+                    "Colaboradores": str(qtd_colab),
+                    "Ticket Medio": f"R$ {media:,.2f}"
+                }
+                
+                # Gera Gráficos para o PDF
+                fig_area = px.bar(df.groupby('Area')['Valor (R$)'].sum().reset_index().sort_values('Valor (R$)'), 
+                                  x='Valor (R$)', y='Area', orientation='h', title="Custo por Área")
+                fig_emp = px.pie(df.groupby('Empresa')['Valor (R$)'].sum().reset_index(), 
+                                 values='Valor (R$)', names='Empresa', title="Custo por Empresa")
+                
+                with col_exp1:
+                    if st.button("📄 Baixar Relatório PDF (Analítico)", use_container_width=True):
+                        with st.spinner("Gerando PDF..."):
+                            pdf_bytes = gerar_pdf_analitico(df, metrics_export, [fig_area, fig_emp], user['name'])
+                            st.download_button("⬇️ Clique para Download PDF", data=pdf_bytes, file_name="relatorio_financeiro.pdf", mime="application/pdf", key="pdf_down")
+                
+                with col_exp2:
+                    if st.button("📊 Baixar Excel Completo (XLSX)", use_container_width=True):
+                        with st.spinner("Gerando Excel..."):
+                            xls_bytes = gerar_excel_personalizado(df)
+                            st.download_button("⬇️ Clique para Download Excel", data=xls_bytes, file_name="dados_financeiros.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="xls_down")
+
+            st.divider()
             subtab1, subtab2, subtab3 = st.tabs(["Visão Geral", "Inteligência", "Detalhado"])
             
             with subtab1:
                 c_viz1, c_viz2 = st.columns(2)
-                c_viz1.plotly_chart(px.bar(df.groupby('Area')['Valor (R$)'].sum().reset_index().sort_values('Valor (R$)'), x='Valor (R$)', y='Area', orientation='h', title="Custo por Área"), use_container_width=True)
-                c_viz2.plotly_chart(px.pie(df.groupby('Empresa')['Valor (R$)'].sum().reset_index(), values='Valor (R$)', names='Empresa', title="Custo por Empresa"), use_container_width=True)
+                c_viz1.plotly_chart(fig_area, use_container_width=True)
+                c_viz2.plotly_chart(fig_emp, use_container_width=True)
 
             with subtab2:
                 limite_horas = st.number_input("Alerta Horas >", value=100)
@@ -280,10 +311,9 @@ with abas[0]:
                 if not outliers.empty:
                     st.warning(f"{len(outliers)} pessoas acima do limite.")
                     st.dataframe(outliers, use_container_width=True)
-                else: st.success("Ninguém acima do limite.")
+                else: st.success("Tudo OK.")
 
             with subtab3:
-                # --- Lógica de Tabela Detalhada com Pivot ---
                 def cat_evento(e):
                     e = str(e).upper()
                     if "60%" in e: return "60%"
@@ -293,182 +323,127 @@ with abas[0]:
                 df_detalhe = df.copy()
                 df_detalhe['Cat'] = df_detalhe['Tipo de Evento'].apply(cat_evento)
                 
-                # Pivot para organizar colunas
                 pivot = df_detalhe.pivot_table(
-                    index=['ID Func', 'Nome', 'Cargo'], 
-                    columns='Cat', 
-                    values=['Horas Decimais', 'Valor (R$)'], 
-                    aggfunc='sum', 
-                    fill_value=0
+                    index=['ID Func', 'Nome', 'Cargo'], columns='Cat', 
+                    values=['Horas Decimais', 'Valor (R$)'], aggfunc='sum', fill_value=0
                 )
-                
-                # Achatando colunas (MultiIndex)
                 pivot.columns = [f'{c[0]}|{c[1]}' for c in pivot.columns]
                 pivot = pivot.reset_index()
                 
-                # Garante colunas necessárias
                 cols_check = ['Horas Decimais|60%', 'Valor (R$)|60%', 'Horas Decimais|DSR', 'Valor (R$)|DSR']
                 for c in cols_check:
                     if c not in pivot.columns: pivot[c] = 0.0
                 
-                # Cálculos e Formatações
                 cols_valor = [c for c in pivot.columns if 'Valor (R$)|' in c]
                 pivot['Total Geral (R$)'] = pivot[cols_valor].sum(axis=1)
                 
                 pivot['Banco 60%'] = pivot['Horas Decimais|60%'].apply(formatar_horas_decimal_para_str)
                 pivot['Horas DSR'] = pivot['Horas Decimais|DSR'].apply(formatar_horas_decimal_para_str)
                 
-                # Seleção e Ordem Final
-                cols_final = [
-                    'ID Func', 'Nome', 'Cargo', 
-                    'Banco 60%', 'Valor (R$)|60%', 
-                    'Horas DSR', 'Valor (R$)|DSR', 
-                    'Total Geral (R$)'
-                ]
-                # Filtro de segurança (caso alguma coluna não tenha sido gerada)
+                cols_final = ['ID Func', 'Nome', 'Cargo', 'Banco 60%', 'Valor (R$)|60%', 'Horas DSR', 'Valor (R$)|DSR', 'Total Geral (R$)']
                 cols_final = [c for c in cols_final if c in pivot.columns]
                 
-                # Exibição
-                st.dataframe(
-                    pivot[cols_final].style.format({
-                        "Valor (R$)|60%": "R$ {:,.2f}", 
-                        "Valor (R$)|DSR": "R$ {:,.2f}", 
-                        "Total Geral (R$)": "R$ {:,.2f}"
-                    }),
-                    use_container_width=True,
-                    hide_index=True  # Remove a coluna de índice
-                )
+                st.dataframe(pivot[cols_final].style.format({"Valor (R$)|60%": "R$ {:,.2f}", "Valor (R$)|DSR": "R$ {:,.2f}", "Total Geral (R$)": "R$ {:,.2f}"}), use_container_width=True, hide_index=True)
 
 # ==============================================================================
 # ABA 2: CENÁRIOS
 # ==============================================================================
 with abas[1]:
-    st.header("🔮 Simulador de Compensação")
-    if 'df_com_areas' not in st.session_state:
-        st.info("Carregue os dados no Dashboard primeiro.")
-    else:
+    st.header("🔮 Simulador")
+    if 'df_com_areas' in st.session_state:
         df_base = st.session_state['df_com_areas'].copy()
         with st.container(border=True):
-            col_s1, col_s2, col_s3 = st.columns(3)
-            with col_s1:
-                areas_sim = sorted(df_base['Area'].unique())
-                area_target = st.multiselect("Áreas Alvo", areas_sim, default=areas_sim)
-                threshold = st.number_input("Saldo > X horas:", value=40)
-            with col_s2:
-                perc_cash = st.slider("% Pagar em Dinheiro", 0, 100, 50)
-                meses_cash = st.number_input("Parcelas Pagamento", 1, 24, 3)
-            with col_s3:
-                perc_folga = 100 - perc_cash
-                st.info(f"% Compensar em Folgas: {perc_folga}%")
-                meses_folga = st.number_input("Meses para Folgar", 1, 24, 6)
-
-        df_agg = df_base.groupby(['Nome', 'Empresa', 'Area']).agg({'Horas Decimais': 'sum', 'Valor (R$)': 'sum'}).reset_index()
-        df_target = df_agg[(df_agg['Horas Decimais'] >= threshold) & (df_agg['Area'].isin(area_target))].copy()
-
-        if not df_target.empty:
-            df_target['Pagar (R$)'] = df_target['Valor (R$)'] * (perc_cash/100)
-            df_target['Mensal (R$)'] = df_target['Pagar (R$)'] / meses_cash
-            df_target['Folgar (Dias)'] = (df_target['Horas Decimais'] * (perc_folga/100)) / 8
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                areas = sorted(df_base['Area'].unique())
+                target = st.multiselect("Áreas Alvo", areas, default=areas)
+                th = st.number_input("Saldo > X horas:", value=40)
+            with c2:
+                pcash = st.slider("% Pagar", 0, 100, 50)
+                mcash = st.number_input("Parcelas Pagamento", 1, 24, 3)
+            with c3:
+                pfolga = 100 - pcash
+                st.info(f"% Folgar: {pfolga}%")
+                mfolga = st.number_input("Meses Folga", 1, 24, 6)
+        
+        agg = df_base.groupby(['Nome', 'Empresa', 'Area']).agg({'Horas Decimais': 'sum', 'Valor (R$)': 'sum'}).reset_index()
+        final = agg[(agg['Horas Decimais'] >= th) & (agg['Area'].isin(target))].copy()
+        
+        if not final.empty:
+            final['Pagar'] = final['Valor (R$)'] * (pcash/100)
+            final['Mensal'] = final['Pagar'] / mcash
+            final['Dias'] = (final['Horas Decimais'] * (pfolga/100)) / 8
             
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Custo Total", f"R$ {df_target['Pagar (R$)'].sum():,.2f}")
-            m2.metric("Mensalidade", f"R$ {df_target['Mensal (R$)'].sum():,.2f}")
-            m3.metric("Dias Off Total", f"{df_target['Folgar (Dias)'].sum():,.1f}")
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Custo Total", f"R$ {final['Pagar'].sum():,.2f}")
+            k2.metric("Mensalidade", f"R$ {final['Mensal'].sum():,.2f}")
+            k3.metric("Dias Off", f"{final['Dias'].sum():,.1f}")
             
-            st.dataframe(df_target.style.format({'Pagar (R$)': 'R$ {:,.2f}', 'Mensal (R$)': 'R$ {:,.2f}', 'Folgar (Dias)': '{:.1f}'}), use_container_width=True)
+            st.dataframe(final.style.format({'Pagar': 'R$ {:,.2f}', 'Mensal': 'R$ {:,.2f}', 'Dias': '{:.1f}'}), use_container_width=True)
+    else: st.info("Carregue dados.")
 
 # ==============================================================================
 # ABA 3: CONFIGURAÇÃO
 # ==============================================================================
 with abas[2]:
     c1, c2 = st.columns(2)
-    df_atual = st.session_state.get('df_financeiro', pd.DataFrame())
+    df_cur = st.session_state.get('df_financeiro', pd.DataFrame())
     
     with c1:
         st.subheader("Cargos")
-        mapa_cargos = carregar_mapa_cargos_mongo()
-        
-        cargos_existentes = []
-        if not df_atual.empty and 'Cargo' in df_atual.columns:
-            cargos_existentes = list(df_atual['Cargo'].unique())
-            
-        todos_cargos = sorted(list(set(cargos_existentes) | set(mapa_cargos.keys())))
-        
-        if todos_cargos:
-            df_cargos = pd.DataFrame([{"Cargo": c, "Area": mapa_cargos.get(c, "")} for c in todos_cargos])
-            edited = st.data_editor(df_cargos, use_container_width=True, hide_index=True)
+        mcargos = carregar_mapa_cargos_mongo()
+        cexist = list(df_cur['Cargo'].unique()) if not df_cur.empty and 'Cargo' in df_cur.columns else []
+        all_c = sorted(list(set(cexist) | set(mcargos.keys())))
+        if all_c:
+            edit = st.data_editor(pd.DataFrame([{"Cargo": c, "Area": mcargos.get(c, "")} for c in all_c]), use_container_width=True, hide_index=True)
             if st.button("Salvar Cargos"):
-                novo_mapa = {row['Cargo']: row['Area'] for _, row in edited.iterrows() if row['Area']}
-                salvar_mapa_cargos_mongo(novo_mapa)
+                salvar_mapa_cargos_mongo({r['Cargo']: r['Area'] for _, r in edit.iterrows() if r['Area']})
                 st.success("Salvo!")
-        else:
-            st.info("Nenhum cargo encontrado (carregue dados primeiro).")
-            
+    
     with c2:
-        st.subheader("Exceções (Pessoas)")
-        mapa_excecoes = carregar_mapa_excecoes_mongo()
-        
-        if not df_atual.empty and 'Nome' in df_atual.columns:
-            nomes = sorted(df_atual['Nome'].unique())
-            df_exc = pd.DataFrame([{"Nome": n, "Area Excecao": mapa_excecoes.get(n, "")} for n in nomes])
-            edited_exc = st.data_editor(df_exc, use_container_width=True, hide_index=True)
+        st.subheader("Exceções")
+        mexc = carregar_mapa_excecoes_mongo()
+        if not df_cur.empty and 'Nome' in df_cur.columns:
+            nomes = sorted(df_cur['Nome'].unique())
+            edit_exc = st.data_editor(pd.DataFrame([{"Nome": n, "Area Excecao": mexc.get(n, "")} for n in nomes]), use_container_width=True, hide_index=True)
             if st.button("Salvar Exceções"):
-                novo_mapa_exc = {row['Nome']: row['Area Excecao'] for _, row in edited_exc.iterrows() if row['Area Excecao']}
-                salvar_mapa_excecoes_mongo(novo_mapa_exc)
+                salvar_mapa_excecoes_mongo({r['Nome']: r['Area Excecao'] for _, r in edit_exc.iterrows() if r['Area Excecao']})
                 st.success("Salvo!")
-        else:
-            st.info("Carregue dados no Dashboard para configurar exceções de pessoas.")
+        else: st.info("Carregue dados.")
 
 # ==============================================================================
-# ABA 4: ADMINISTRAÇÃO (Apenas Admin)
+# ABA 4: ADMINISTRAÇÃO
 # ==============================================================================
 if is_admin:
     with abas[3]:
-        st.header("🔐 Gestão de Usuários")
-        col_add, col_list = st.columns([1, 2])
+        st.header("🔐 Usuários")
+        c_add, c_list = st.columns([1, 2])
+        with c_add:
+            with st.form("new_user"):
+                nn = st.text_input("Nome")
+                ne = st.text_input("Email")
+                np = st.text_input("Senha", type="password")
+                nr = st.selectbox("Cargo", ["usuario", "admin"])
+                if st.form_submit_button("Criar"):
+                    if criar_usuario(nn, ne, np, nr): st.success("Criado!"); time.sleep(1); st.rerun()
+                    else: st.error("Erro")
         
-        with col_add:
-            with st.form("add_user_form"):
-                st.subheader("Novo Usuário")
-                new_name = st.text_input("Nome")
-                new_email = st.text_input("E-mail")
-                new_pass = st.text_input("Senha", type="password")
-                new_role = st.selectbox("Cargo", ["usuario", "admin"])
-                if st.form_submit_button("Criar Usuário"):
-                    if len(new_pass) < 6: st.error("Senha curta (min 6).")
-                    else:
-                        if criar_usuario(new_name, new_email, new_pass, new_role):
-                            st.success(f"Criado: {new_name}")
-                            time.sleep(1)
-                            st.rerun()
-                        else: st.error("Erro ao criar.")
-
-        with col_list:
-            st.subheader("Usuários Existentes")
-            users = listar_todos_usuarios()
-            if users:
-                for user_row in users:
-                    with st.expander(f"{user_row['name']} ({user_row['role']}) {'🔴' if not user_row.get('active', True) else '🟢'}"):
-                        c_ed1, c_ed2 = st.columns(2)
-                        with c_ed1:
-                            with st.form(f"edit_{user_row['email']}"):
-                                ed_nome = st.text_input("Nome", user_row['name'])
-                                ed_role = st.selectbox("Cargo", ["usuario", "admin"], index=0 if user_row['role']=="usuario" else 1)
-                                ed_pass = st.text_input("Nova Senha (vazio para manter)", type="password")
-                                if st.form_submit_button("💾 Atualizar"):
-                                    atualizar_dados_usuario(user_row['email'], ed_nome, user_row['email'], ed_role, ed_pass)
-                                    st.success("Atualizado!")
-                                    time.sleep(1)
-                                    st.rerun()
-                        with c_ed2:
-                            is_active = user_row.get('active', True)
-                            if user_row['email'] == st.session_state['user_info']['email']:
-                                st.warning("Não pode desativar a si mesmo.")
-                            elif is_active:
-                                if st.button("🚫 Desativar", key=f"ban_{user_row['email']}"):
-                                    atualizar_status_usuario(user_row['email'], False)
-                                    st.rerun()
-                            else:
-                                if st.button("✅ Reativar", key=f"unban_{user_row['email']}"):
-                                    atualizar_status_usuario(user_row['email'], True)
-                                    st.rerun()
+        with c_list:
+            usrs = listar_todos_usuarios()
+            for u in usrs:
+                with st.expander(f"{u['name']} ({u['role']}) {'🟢' if u.get('active', True) else '🔴'}"):
+                    ce1, ce2 = st.columns(2)
+                    with ce1:
+                        with st.form(f"ed_{u['email']}"):
+                            en = st.text_input("Nome", u['name'])
+                            er = st.selectbox("Cargo", ["usuario", "admin"], index=0 if u['role']=='usuario' else 1)
+                            ep = st.text_input("Nova Senha", type="password")
+                            if st.form_submit_button("Salvar"):
+                                atualizar_dados_usuario(u['email'], en, u['email'], er, ep)
+                                st.success("OK!"); time.sleep(1); st.rerun()
+                    with ce2:
+                        act = u.get('active', True)
+                        if u['email'] != user['email']:
+                            if st.button("🚫 Desativar" if act else "✅ Ativar", key=f"btn_{u['email']}"):
+                                atualizar_status_usuario(u['email'], not act)
+                                st.rerun()
