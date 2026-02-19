@@ -3,13 +3,18 @@ import pandas as pd
 import pymongo
 from pymongo import MongoClient, UpdateOne
 import bcrypt
+import certifi  # <--- NOVA IMPORTAÇÃO ESSENCIAL
 
 # --- CONEXÃO COM MONGODB ---
 @st.cache_resource
 def init_connection():
     uri = st.secrets.get("MONGO_URI", "")
     if not uri: return None
-    return MongoClient(uri)
+    
+    # CORREÇÃO DO ERRO DE SSL:
+    # Adicionamos tlsCAFile=certifi.where() para garantir que o Streamlit
+    # tenha os certificados de segurança corretos para falar com o Atlas.
+    return MongoClient(uri, tlsCAFile=certifi.where())
 
 def get_db():
     client = init_connection()
@@ -37,40 +42,46 @@ def criar_usuario(nome, email, senha, cargo='usuario', ativo=True):
             upsert=True
         )
         return True
-    except Exception as e: # <--- CORREÇÃO AQUI (Espaço adicionado)
+    except Exception as e:
         return False
 
 def verificar_login(email, senha):
     db = get_db()
     if db is None: return None
     
-    usuario = db.users.find_one({"email": email})
-    
-    if usuario:
-        # Verifica se está ativo
-        if not usuario.get('active', True):
-            return "BLOQUEADO"
-            
-        if bcrypt.checkpw(senha.encode('utf-8'), usuario['password']):
-            # Retorna um dicionário com os dados do usuário
-            return {
-                "name": usuario['name'],
-                "role": usuario.get('role', 'usuario'),
-                "email": usuario['email']
-            }
+    try:
+        usuario = db.users.find_one({"email": email})
+        
+        if usuario:
+            # Verifica se está ativo
+            if not usuario.get('active', True):
+                return "BLOQUEADO"
+                
+            if bcrypt.checkpw(senha.encode('utf-8'), usuario['password']):
+                # Retorna um dicionário com os dados do usuário
+                return {
+                    "name": usuario['name'],
+                    "role": usuario.get('role', 'usuario'),
+                    "email": usuario['email']
+                }
+    except Exception:
+        return None
     return None
 
 def listar_todos_usuarios():
     db = get_db()
     if db is None: return []
-    # Retorna todos os usuários, ocultando a senha
-    return list(db.users.find({}, {"password": 0, "_id": 0}))
+    try:
+        return list(db.users.find({}, {"password": 0, "_id": 0}))
+    except: return []
 
 def atualizar_status_usuario(email, novo_status_ativo):
     """Ativa ou Desativa um usuário"""
     db = get_db()
     if db is None: return
-    db.users.update_one({"email": email}, {"$set": {"active": novo_status_ativo}})
+    try:
+        db.users.update_one({"email": email}, {"$set": {"active": novo_status_ativo}})
+    except: pass
 
 def atualizar_dados_usuario(email_antigo, novo_nome, novo_email, novo_cargo, nova_senha=None):
     db = get_db()
@@ -86,9 +97,10 @@ def atualizar_dados_usuario(email_antigo, novo_nome, novo_email, novo_cargo, nov
         hashed = bcrypt.hashpw(nova_senha.encode('utf-8'), bcrypt.gensalt())
         dados_atualizar["password"] = hashed
     
-    # Atualiza baseado no email antigo
-    db.users.update_one({"email": email_antigo}, {"$set": dados_atualizar})
-    return True
+    try:
+        db.users.update_one({"email": email_antigo}, {"$set": dados_atualizar})
+        return True
+    except: return False
 
 # --- FUNÇÕES FINANCEIRAS ---
 
@@ -105,8 +117,10 @@ def salvar_dados_mongo(df):
         dados['_id'] = doc_id
         operations.append(UpdateOne({'_id': doc_id}, {'$set': dados}, upsert=True))
     if operations:
-        result = collection.bulk_write(operations)
-        return result.upserted_count + result.modified_count
+        try:
+            result = collection.bulk_write(operations)
+            return result.upserted_count + result.modified_count
+        except: return 0
     return 0
 
 @st.cache_data(ttl=600)
@@ -125,32 +139,43 @@ def carregar_dados_mongo(empresas_sel, competencias_sel):
     db = get_db()
     if db is None: return pd.DataFrame()
     if not empresas_sel or not competencias_sel: return pd.DataFrame()
-    query = {"Empresa": {"$in": empresas_sel}, "Competência": {"$in": competencias_sel}}
-    cursor = db.folha_eventos.find(query)
-    df = pd.DataFrame(list(cursor))
-    if not df.empty and '_id' in df.columns: df = df.drop(columns=['_id'])
-    return df
+    
+    try:
+        query = {"Empresa": {"$in": empresas_sel}, "Competência": {"$in": competencias_sel}}
+        cursor = db.folha_eventos.find(query)
+        df = pd.DataFrame(list(cursor))
+        if not df.empty and '_id' in df.columns: df = df.drop(columns=['_id'])
+        return df
+    except: return pd.DataFrame()
 
 # --- CONFIGURAÇÕES (CARGOS E EXCEÇÕES) ---
 
 def carregar_mapa_cargos_mongo():
     db = get_db()
     if db is None: return {}
-    doc = db.parametros.find_one({"_id": "mapeamento_areas"})
-    return doc.get('mapa', {}) if doc else {}
+    try:
+        doc = db.parametros.find_one({"_id": "mapeamento_areas"})
+        return doc.get('mapa', {}) if doc else {}
+    except: return {}
 
 def salvar_mapa_cargos_mongo(novo_mapa):
     db = get_db()
     if db is None: return
-    db.parametros.update_one({"_id": "mapeamento_areas"}, {"$set": {"mapa": novo_mapa}}, upsert=True)
+    try:
+        db.parametros.update_one({"_id": "mapeamento_areas"}, {"$set": {"mapa": novo_mapa}}, upsert=True)
+    except: pass
 
 def carregar_mapa_excecoes_mongo():
     db = get_db()
     if db is None: return {}
-    doc = db.parametros.find_one({"_id": "mapeamento_excecoes"})
-    return doc.get('mapa', {}) if doc else {}
+    try:
+        doc = db.parametros.find_one({"_id": "mapeamento_excecoes"})
+        return doc.get('mapa', {}) if doc else {}
+    except: return {}
 
 def salvar_mapa_excecoes_mongo(novo_mapa):
     db = get_db()
     if db is None: return
-    db.parametros.update_one({"_id": "mapeamento_excecoes"}, {"$set": {"mapa": novo_mapa}}, upsert=True)
+    try:
+        db.parametros.update_one({"_id": "mapeamento_excecoes"}, {"$set": {"mapa": novo_mapa}}, upsert=True)
+    except: pass
