@@ -1,6 +1,7 @@
 streamlit
 pandas
-pymongo
+pymongo[srv]
 plotly
 bcrypt
 dnspython
+certifi
